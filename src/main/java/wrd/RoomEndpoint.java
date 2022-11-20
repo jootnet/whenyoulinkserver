@@ -29,30 +29,31 @@ public class RoomEndpoint {
 	public void onMessage(Session ses, String msg) throws IOException {
 		var root = JSON.parseObject(msg);
 		var peer_id = root.getString("peer_id");
-		var mid = root.getString("mid");
+		var me_id = root.getString("me_id");
 		if (peer_id != null) {
 			if (peer_id.isEmpty() || peer_id.isBlank())
 				peer_id = null;
 		}
-		if (mid != null) {
-			if (mid.isEmpty() || mid.isBlank())
-				mid = null;
+		if (me_id != null) {
+			if (me_id.isEmpty() || me_id.isBlank())
+				me_id = null;
 		}
 		if (peer_id == null) {
+			if (me_id == null) return;
 			// 如果对方id为null，表示是设置（或续订）自身id
 			String currentMid = (String) ses.getUserProperties().get(ID_KEY);
-			if (mid.equals(currentMid)) {
+			if (me_id.equals(currentMid)) {
 				ses.getBasicRemote().sendText(MID_SET_OK);
 				return;
 			}
-			if (id2Session.putIfAbsent(mid, ses) != null) {
+			if (id2Session.putIfAbsent(me_id, ses) != null) {
 				ses.getBasicRemote().sendText(MID_SET_FAILD_DUP);
 				return;
 			}
 			if (currentMid != null) {
 				id2Session.remove(currentMid);
 			}
-			ses.getUserProperties().put(ID_KEY, mid);
+			ses.getUserProperties().put(ID_KEY, me_id);
 			ses.getBasicRemote().sendText(MID_SET_OK);
 		} else {
 			if (!ses.getUserProperties().containsKey(ID_KEY)) {
@@ -66,7 +67,7 @@ public class RoomEndpoint {
 				ses.getBasicRemote().sendText(SEND_FAILD_NOTFOUND);
 			} else {
 				var data = root;
-				data.remove("mid");
+				data.remove("me_id");
 				data.put("peer_id", ses.getUserProperties().get(ID_KEY));
 				peer.getBasicRemote().sendText(data.toString());
 			}
