@@ -66,9 +66,8 @@ public class RoomEndpoint {
 				ses.getBasicRemote().sendText(SEND_FAILD_NOTFOUND);
 			} else {
 				var data = root;
-				data.remove("peer_id");
 				data.remove("mid");
-				data.put("mid", mid);
+				data.put("peer_id", ses.getUserProperties().get(ID_KEY));
 				peer.getBasicRemote().sendText(data.toString());
 			}
 		}
