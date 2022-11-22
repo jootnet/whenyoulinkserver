@@ -1,0 +1,217 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="UTF-8" />
+    <title>温油轻远程</title>
+    <script src="jquery.slim.min.js"></script>
+    <script src="adapter.min.js"></script>
+    <style>
+      html,
+      body {
+        margin: 0px;
+      }
+      #vidRemoteScreen {
+        width: 100%;
+        height: 100%;
+      }
+      #pannelControls {
+        position: absolute;
+        width: 400px;
+        height: 300px;
+        display: inline-block;
+        left: calc(50% - 200px);
+        top: calc(50% - 150px);
+        z-index: 999;
+        text-align: center;
+        background-color: cadetblue;
+      }
+    </style>
+  </head>
+  <body>
+    <video id="vidRemoteScreen" autoplay></video>
+    <div id="pannelControls">
+      <p><label for="txtPeerId">识别码：</label><input id="txtPeerId" /></p>
+      <p><label for="txtPeerPsw">验证码：</label><input id="txtPeerPsw" /></p>
+      <p><button id="btnConnect" disabled>连接</button></p>
+    </div>
+    <script>
+      const vidRemoteScreen = $("#vidRemoteScreen");
+      const txtPeerId = $("#txtPeerId");
+      const txtPeerPsw = $("#txtPeerPsw");
+      const btnConnect = $("#btnConnect");
+	  const pannelControls = $("#pannelControls");
+      const meId = "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(
+        /[xy]/g,
+        (c) => {
+          let r = (Math.random() * 16) | 0,
+            v = c == "x" ? r : (r & 0x3) | 0x8;
+          return v.toString(16);
+        }
+      );
+
+      let websocket = new WebSocket("ws://8.130.41.127/wrd/room");
+      let peerConnection = null;
+      let dataChannel = null;
+      let remoteCandidates = [];
+      let haveOffer = false;
+      let peerId = null;
+
+      websocket.onopen = wsonopen;
+      websocket.onmessage = wsonmessage;
+
+      function wsonopen() {
+        websocket.send(JSON.stringify({ me_id: meId }));
+      }
+      function wsonmessage(event) {
+        console.log(event.data);
+        const msg = JSON.parse(event.data);
+        if (!!!msg.peer_id) {
+          if (msg.code === 0) {
+            btnConnect.prop("disabled", false);
+          }
+          return;
+        }
+        if (msg.type === "sdp") {
+          createPeerconnection();
+          const desc = new RTCSessionDescription({
+            type: "offer",
+            sdp: msg.sdp,
+          });
+
+          peerConnection
+            .setRemoteDescription(desc)
+            .then(function () {
+              return peerConnection.createAnswer();
+            })
+            .then(function (answer) {
+              return peerConnection.setLocalDescription(answer);
+            })
+            .then(function () {
+              haveOffer = true;
+              websocket.send(
+                JSON.stringify({
+                  type: "sdp",
+                  peer_id: peerId,
+                  sdp: peerConnection.localDescription.sdp,
+                })
+              );
+            })
+            .catch(function () {
+              console.log("RTC Error", reason);
+            });
+          for (let i = 0; i < remoteCandidates.length; i++) {
+            handleCandidate(remoteCandidates[i]);
+          }
+          return;
+        }
+        if (msg.type === "candidate") {
+          if (!haveOffer) {
+            remoteCandidates.push(msg);
+          } else {
+            handleCandidate(msg);
+          }
+          return;
+        }
+      }
+
+      function createPeerconnection() {
+        peerConnection = null;
+        dataChannel = null;
+        remoteCandidates = [];
+        haveOffer = false;
+        peerConnection = new RTCPeerConnection({
+          iceServers: [
+            {
+              urls: "stun:openrelay.metered.ca:80",
+            },
+            {
+              urls: "turn:openrelay.metered.ca:80",
+              username: "openrelayproject",
+              credential: "openrelayproject",
+            },
+            {
+              urls: "turn:openrelay.metered.ca:443",
+              username: "openrelayproject",
+              credential: "openrelayproject",
+            },
+            {
+              urls: "turn:openrelay.metered.ca:443?transport=tcp",
+              username: "openrelayproject",
+              credential: "openrelayproject",
+            },
+          ],
+        });
+
+        peerConnection.ontrack = function (event) {
+          const vid = vidRemoteScreen[0];
+          vid.srcObject = event.streams[0];
+          if (!!!vid.srcObject) {
+            vid.srcObject = event.streams[0];
+          } else {
+            vid.srcObject.addTrack(event.track);
+          }
+        };
+
+        peerConnection.onicecandidate = function (event) {
+          if (event.candidate) {
+            websocket.send(
+              JSON.stringify({
+                type: "candidate",
+                peer_id: peerId,
+                mid: event.candidate.sdpMid,
+                mline_idx: event.candidate.sdpMLineIndex,
+                sdp: event.candidate.candidate,
+              })
+            );
+          }
+        };
+
+        peerConnection.ondatachannel = function (event) {
+          setupDataChannel(event.channel);
+        };
+      }
+
+      function setupDataChannel(data_channel) {
+        dataChannel = data_channel;
+        dataChannel.onopen = function (event) {
+          dataChannel.send("hello world!");
+		  pannelControls.hide();
+        };
+        dataChannel.onmessage = function (event) {
+          console.log(event.data);
+        };
+      }
+
+      function handleCandidate(msg) {
+        var candidate = new RTCIceCandidate({
+          sdpMid: msg.mid,
+          sdpMLineIndex: msg.mline_idx,
+          sdp: msg.sdp,
+        });
+        peerConnection.addIceCandidate(candidate);
+      }
+
+      setInterval(() => {
+        // 每15s检测一次websocket连接
+        if (websocket.readyState != WebSocket.OPEN) {
+          websocket.close();
+          websocket = new WebSocket("ws://8.130.41.127/wrd/room");
+          websocket.onopen = wsonopen;
+          websocket.onmessage = wsonmessage;
+          btnConnect.disabled = true;
+        }
+      }, 15000);
+
+      btnConnect.on("click", () => {
+        websocket.send(
+          JSON.stringify({
+            type: "invite",
+            peer_id: txtPeerId.val(),
+            psw: txtPeerPsw.val(),
+          })
+        );
+        peerId = txtPeerId.val();
+      });
+    </script>
+  </body>
+</html>
