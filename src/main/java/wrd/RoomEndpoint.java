@@ -88,5 +88,6 @@ public class RoomEndpoint {
 		if (mid != null) {
 			id2Session.remove(mid);
 		}
+		ses.getUserProperties().clear();
 	}
 }
