@@ -18,15 +18,16 @@ public class RoomEndpoint {
 	private static final String ID_KEY = "id";
 	// 一些预设的返回字符串
 	private static final String MID_SET_OK = "{\"code\":0}";
-	private static final String MID_SET_FAILD_DUP = "{\"code\":-1,\"msg\":\"登录失败，ID重复。如果存在前次登录，可能需要退出后等待一分钟超时。\"}";
-	private static final String SEND_FAILD_NLOGIN = "{\"code\":-2,\"msg\":\"发送数据失败，未登录。\"}";
-	private static final String SEND_FAILD_NOTFOUND = "{\"code\":-3,\"msg\":\"发送数据失败，对方不在线。\"}";
+	private static final String MID_SET_FAILD_DUP = "{\"code\":-1}";//,\"msg\":\"登录失败，ID重复。如果存在前次登录，可能需要退出后等待一分钟超时。\"}";
+	private static final String SEND_FAILD_NLOGIN = "{\"code\":-2}";//,\"msg\":\"发送数据失败，未登录。\"}";
+	private static final String SEND_FAILD_NOTFOUND = "{\"code\":-3}";//,\"msg\":\"发送数据失败，对方不在线。\"}";
 
 	// id与会话的对应关系
 	private static Map<String, Session> id2Session = new ConcurrentHashMap<>();
 
 	@OnMessage
 	public void onMessage(Session ses, String msg) throws IOException {
+		System.out.println(msg);
 		var root = JSON.parseObject(msg);
 		var peer_id = root.getString("peer_id");
 		var me_id = root.getString("me_id");
