@@ -2,216 +2,353 @@
 <html>
   <head>
     <meta charset="UTF-8" />
+    <!-- import CSS -->
+    <link
+      rel="stylesheet"
+      href="//unpkg.com/element-ui/lib/theme-chalk/index.css"
+    />
     <title>温油轻远程</title>
-    <script src="jquery.slim.min.js"></script>
-    <script src="adapter.min.js"></script>
-    <style>
-      html,
-      body {
-        margin: 0px;
-      }
-      #vidRemoteScreen {
-        width: 100%;
-        height: 100%;
-      }
-      #pannelControls {
-        position: absolute;
-        width: 400px;
-        height: 300px;
-        display: inline-block;
-        left: calc(50% - 200px);
-        top: calc(50% - 150px);
-        z-index: 999;
-        text-align: center;
-        background-color: cadetblue;
-      }
-    </style>
   </head>
   <body>
-    <video id="vidRemoteScreen" autoplay></video>
-    <div id="pannelControls">
-      <p><label for="txtPeerId">识别码：</label><input id="txtPeerId" /></p>
-      <p><label for="txtPeerPsw">验证码：</label><input id="txtPeerPsw" /></p>
-      <p><button id="btnConnect" disabled>连接</button></p>
+    <div id="app">
+      <video muted autoplay></video>
+      <!-- Form -->
+      <el-dialog
+        title="开始远程连接"
+        :width="dialogFormWidth"
+        :close-on-click-modal="false"
+        :close-on-press-escape="false"
+        :show-close="false"
+        center
+        :visible="dialogFormVisible"
+      >
+        <el-form :model="form" :rules="rules" ref="form" label-width="90px">
+          <el-form-item label="识别码" prop="peer_id">
+            <el-input
+              v-model="form.peer_id"
+              autocomplete="off"
+              :disabled="wsDisconnected"
+              :readonly="connecting"
+              minlength="1"
+              maxlength="11"
+            ></el-input>
+          </el-form-item>
+          <el-form-item label="验证码" prop="psw">
+            <el-input
+              v-model="form.psw"
+              autocomplete="off"
+              :disabled="wsDisconnected"
+              :readonly="connecting"
+              minlength="1"
+              maxlength="8"
+              :show-password="true"
+            ></el-input>
+          </el-form-item>
+        </el-form>
+        <div slot="footer" class="dialog-footer">
+          <el-button
+            type="primary"
+            @click="connect"
+            :loading="connecting"
+            :disabled="wsDisconnected"
+            >连 接</el-button
+          >
+        </div>
+      </el-dialog>
     </div>
-    <script>
-      const vidRemoteScreen = $("#vidRemoteScreen");
-      const txtPeerId = $("#txtPeerId");
-      const txtPeerPsw = $("#txtPeerPsw");
-      const btnConnect = $("#btnConnect");
-	  const pannelControls = $("#pannelControls");
-      const meId = "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(
-        /[xy]/g,
-        (c) => {
-          let r = (Math.random() * 16) | 0,
-            v = c == "x" ? r : (r & 0x3) | 0x8;
-          return v.toString(16);
-        }
-      );
-
-      let websocket = new WebSocket("ws://8.130.41.127/wrd/room");
-      let peerConnection = null;
-      let dataChannel = null;
-      let remoteCandidates = [];
-      let haveOffer = false;
-      let peerId = null;
-
-      websocket.onopen = wsonopen;
-      websocket.onmessage = wsonmessage;
-
-      function wsonopen() {
-        websocket.send(JSON.stringify({ me_id: meId }));
-      }
-      function wsonmessage(event) {
-        console.log(event.data);
-        const msg = JSON.parse(event.data);
-        if (!!!msg.peer_id) {
-          if (msg.code === 0) {
-            btnConnect.prop("disabled", false);
-          }
-          return;
-        }
-        if (msg.type === "sdp") {
-          createPeerconnection();
-          const desc = new RTCSessionDescription({
-            type: "offer",
-            sdp: msg.sdp,
+  </body>
+  <!-- import Vue before Element -->
+  <script src="//unpkg.com/vue@2/dist/vue.js"></script>
+  <!-- import JavaScript -->
+  <script src="//unpkg.com/element-ui/lib/index.js"></script>
+  <script>
+    const vue = new Vue({
+      el: "#app",
+      data: function () {
+        return {
+          wsDisconnected: true,
+          connecting: false,
+          dialogFormVisible: true,
+          dialogFormWidth: "460px",
+          form: {
+            peer_id: "",
+            psw: "",
+          },
+          rules: {
+            peer_id: [
+              {
+                type: "string",
+                required: true,
+                pattern: /^[A-z0-9]{1,11}$/,
+                message: "识别码最长11位，仅支持大小写字母和数字组合",
+                trigger: "blur",
+              },
+            ],
+            psw: [
+              {
+                type: "string",
+                required: true,
+                pattern: /^[A-z0-9]{1,8}$/,
+                message: "验证码最长8位，仅支持大小写字母和数字组合",
+                trigger: "blur",
+              },
+            ],
+          },
+        };
+      },
+      methods: {
+        connect: function () {
+          this.$refs["form"].validate((valid) => {
+            if (valid) {
+              globalThis.connectToPeer();
+            } else {
+              return false;
+            }
           });
-
-          peerConnection
-            .setRemoteDescription(desc)
-            .then(function () {
-              return peerConnection.createAnswer();
-            })
-            .then(function (answer) {
-              return peerConnection.setLocalDescription(answer);
-            })
-            .then(function () {
-              haveOffer = true;
-              websocket.send(
-                JSON.stringify({
-                  type: "sdp",
-                  peer_id: peerId,
-                  sdp: peerConnection.localDescription.sdp,
-                })
-              );
-            })
-            .catch(function () {
-              console.log("RTC Error", reason);
-            });
-          for (let i = 0; i < remoteCandidates.length; i++) {
-            handleCandidate(remoteCandidates[i]);
-          }
-          return;
-        }
-        if (msg.type === "candidate") {
-          if (!haveOffer) {
-            remoteCandidates.push(msg);
-          } else {
-            handleCandidate(msg);
-          }
-          return;
-        }
+        },
+      },
+    });
+    const meId = "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(
+      /[xy]/g,
+      (c) => {
+        let r = (Math.random() * 16) | 0,
+          v = c == "x" ? r : (r & 0x3) | 0x8;
+        return v.toString(16);
       }
+    );
+    let websocket = new WebSocket("ws://8.130.41.127/wrd/room");
+    let connectTimeoutTimerId = -1;
+    let peerId;
+    let peerConnection;
+    let dataChannel;
+    let remoteCandidates;
+    let haveOffer;
+    let connectHeartBeatDetectTimerId = -1;
 
-      function createPeerconnection() {
+    websocket.onopen = wsonopen;
+    websocket.onmessage = wsonmessage;
+
+    function wsonopen() {
+      websocket.send(JSON.stringify({ me_id: meId }));
+    }
+    function wsonmessage(event) {
+      console.log(event.data);
+      const msg = JSON.parse(event.data);
+      if (!!!msg.peer_id) {
+        if (msg.code === 0) {
+          vue.$data.wsDisconnected = false;
+        } else if (msg.code === -1) {
+          vue.$message.error("连接到服务器失败，请刷新页面后重试");
+        } else if (msg.code === -2) {
+          handleConnectFailed();
+          vue.$message.error(
+            "与服务器的连接未建立，请稍后重试或刷新页面后重试"
+          );
+          websocket.close();
+        } else if (msg.code === -3) {
+          handleConnectFailed();
+          vue.$message.error("目标设备不存在或不在线，请检查您填入的识别码");
+        }
+        return;
+      }
+      handlePeerMsg(msg);
+    }
+
+    setInterval(() => {
+      // 每15s检测一次websocket连接
+      if (!!!websocket || websocket.readyState != WebSocket.OPEN) {
+        websocket.close();
+        websocket = new WebSocket("ws://8.130.41.127/wrd/room");
+        websocket.onopen = wsonopen;
+        websocket.onmessage = wsonmessage;
+        if (!vue.$data.connecting) vue.$data.wsDisconnected = true;
+      }
+    }, 15000);
+
+    function connectToPeer() {
+      if (vue.$data.connecting) return;
+      vue.$data.connecting = true;
+      connectTimeoutTimerId = setTimeout(() => {
+        vue.$message.error("连接超时，可能由于网络故障");
+        vue.$data.connecting = false;
+      }, 60000);
+      websocket.send(
+        JSON.stringify({
+          type: "invite",
+          peer_id: vue.$data.form.peer_id,
+          psw: vue.$data.form.psw,
+        })
+      );
+      peerId = vue.$data.form.peer_id;
+    }
+
+    function handleConnectFailed() {
+      vue.$data.dialogFormVisible = true;
+      vue.$data.connecting = false;
+      clearTimeout(connectTimeoutTimerId);
+      connectTimeoutTimerId = -1;
+      if (!!peerConnection) {
+        peerConnection.close();
         peerConnection = null;
         dataChannel = null;
         remoteCandidates = [];
         haveOffer = false;
-        peerConnection = new RTCPeerConnection({
-          iceServers: [
-            {
-              urls: "stun:openrelay.metered.ca:80",
-            },
-            {
-              urls: "turn:openrelay.metered.ca:80",
-              username: "openrelayproject",
-              credential: "openrelayproject",
-            },
-            {
-              urls: "turn:openrelay.metered.ca:443",
-              username: "openrelayproject",
-              credential: "openrelayproject",
-            },
-            {
-              urls: "turn:openrelay.metered.ca:443?transport=tcp",
-              username: "openrelayproject",
-              credential: "openrelayproject",
-            },
-          ],
-        });
-
-        peerConnection.ontrack = function (event) {
-          const vid = vidRemoteScreen[0];
-          vid.srcObject = event.streams[0];
-          if (!!!vid.srcObject) {
-            vid.srcObject = event.streams[0];
-          } else {
-            vid.srcObject.addTrack(event.track);
-          }
-        };
-
-        peerConnection.onicecandidate = function (event) {
-          if (event.candidate) {
-            websocket.send(
-              JSON.stringify({
-                type: "candidate",
-                peer_id: peerId,
-                mid: event.candidate.sdpMid,
-                mline_idx: event.candidate.sdpMLineIndex,
-                sdp: event.candidate.candidate,
-              })
-            );
-          }
-        };
-
-        peerConnection.ondatachannel = function (event) {
-          setupDataChannel(event.channel);
-        };
       }
+    }
 
-      function setupDataChannel(data_channel) {
-        dataChannel = data_channel;
-        dataChannel.onopen = function (event) {
-          dataChannel.send("hello world!");
-		  pannelControls.hide();
-        };
-        dataChannel.onmessage = function (event) {
-          console.log(event.data);
-        };
+    function handleConnectSucc() {
+      vue.$data.dialogFormVisible = false;
+      vue.$data.connecting = false;
+      clearTimeout(connectTimeoutTimerId);
+      connectTimeoutTimerId = -1;
+      connectHeartBeatDetectTimerId = setTimeout(() => {
+        handleConnectFailed();
+        vue.$message.error("与目标设备的连接断开");
+      }, 60000);
+    }
+
+    function handlePeerMsg(msg) {
+      if (!vue.$data.connecting) return;
+      if (peerId != msg.peer_id) return;
+      if (msg.type === "invite_resp") {
+        if (msg.code === -1) {
+          handleConnectFailed();
+          vue.$message.error("验证码错误，请重试");
+        }
+        return;
       }
-
-      function handleCandidate(msg) {
-        var candidate = new RTCIceCandidate({
-          sdpMid: msg.mid,
-          sdpMLineIndex: msg.mline_idx,
+      if (msg.type === "sdp") {
+        createPeerconnection();
+        const desc = new RTCSessionDescription({
+          type: "offer",
           sdp: msg.sdp,
         });
-        peerConnection.addIceCandidate(candidate);
-      }
 
-      setInterval(() => {
-        // 每15s检测一次websocket连接
-        if (websocket.readyState != WebSocket.OPEN) {
-          websocket.close();
-          websocket = new WebSocket("ws://8.130.41.127/wrd/room");
-          websocket.onopen = wsonopen;
-          websocket.onmessage = wsonmessage;
-          btnConnect.disabled = true;
-        }
-      }, 15000);
-
-      btnConnect.on("click", () => {
-        websocket.send(
-          JSON.stringify({
-            type: "invite",
-            peer_id: txtPeerId.val(),
-            psw: txtPeerPsw.val(),
+        peerConnection
+          .setRemoteDescription(desc)
+          .then(function () {
+            return peerConnection.createAnswer();
           })
-        );
-        peerId = txtPeerId.val();
+          .then(function (answer) {
+            return peerConnection.setLocalDescription(answer);
+          })
+          .then(function () {
+            haveOffer = true;
+            websocket.send(
+              JSON.stringify({
+                type: "sdp",
+                peer_id: peerId,
+                sdp: peerConnection.localDescription.sdp,
+              })
+            );
+          })
+          .catch(function () {
+            console.log("RTC Error", reason);
+          });
+        for (let i = 0; i < remoteCandidates.length; i++) {
+          handleCandidate(remoteCandidates[i]);
+        }
+        return;
+      }
+      if (msg.type === "candidate") {
+        if (!haveOffer) {
+          remoteCandidates.push(msg);
+        } else {
+          handleCandidate(msg);
+        }
+        return;
+      }
+    }
+
+    function handleDataChannelMsg(event) {
+      clearTimeout(connectHeartBeatDetectTimerId);
+      connectHeartBeatDetectTimerId = setTimeout(() => {
+        handleConnectFailed();
+        vue.$message.error("与目标设备的连接断开");
+      }, 60000);
+      if (!!dataChannel) {
+        dataChannel.send("heart beat!");
+      }
+    }
+
+    function createPeerconnection() {
+      peerConnection = null;
+      dataChannel = null;
+      remoteCandidates = [];
+      haveOffer = false;
+      peerConnection = new RTCPeerConnection({
+        iceServers: [
+          {
+            urls: "stun:openrelay.metered.ca:80",
+          },
+          {
+            urls: "turn:openrelay.metered.ca:80",
+            username: "openrelayproject",
+            credential: "openrelayproject",
+          },
+          {
+            urls: "turn:openrelay.metered.ca:443",
+            username: "openrelayproject",
+            credential: "openrelayproject",
+          },
+          {
+            urls: "turn:openrelay.metered.ca:443?transport=tcp",
+            username: "openrelayproject",
+            credential: "openrelayproject",
+          },
+        ],
       });
-    </script>
-  </body>
+
+      peerConnection.ontrack = function (event) {
+        const vid = document.querySelector("video");
+        vid.srcObject = event.streams[0];
+        if (!!!vid.srcObject) {
+          vid.srcObject = event.streams[0];
+        } else {
+          vid.srcObject.addTrack(event.track);
+        }
+      };
+
+      peerConnection.onicecandidate = function (event) {
+        if (event.candidate) {
+          websocket.send(
+            JSON.stringify({
+              type: "candidate",
+              peer_id: peerId,
+              mid: event.candidate.sdpMid,
+              mline_idx: event.candidate.sdpMLineIndex,
+              sdp: event.candidate.candidate,
+            })
+          );
+        }
+      };
+
+      peerConnection.ondatachannel = function (event) {
+        setupDataChannel(event.channel);
+      };
+    }
+
+    function setupDataChannel(data_channel) {
+      dataChannel = data_channel;
+      dataChannel.onopen = function (event) {
+        dataChannel.send("hello world!");
+        handleConnectSucc();
+        setTimeout(() => {
+          dataChannel.send("heart beat!");
+        }, 1000);
+      };
+      dataChannel.onmessage = function (event) {
+        handleDataChannelMsg(event);
+      };
+    }
+
+    function handleCandidate(msg) {
+      var candidate = new RTCIceCandidate({
+        sdpMid: msg.mid,
+        sdpMLineIndex: msg.mline_idx,
+        sdp: msg.sdp,
+      });
+      peerConnection.addIceCandidate(candidate);
+    }
+  </script>
 </html>
