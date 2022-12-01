@@ -123,6 +123,7 @@
       }
     );
     let websocket = new WebSocket(svrHost + "/room");
+    let sendInviteTimerId = -1;
     let connectTimeoutTimerId = -1;
     let peerId;
     let peerConnection;
@@ -199,6 +200,15 @@
           psw: vue.$data.form.psw,
         })
       );
+      sendInviteTimerId = setInterval(() => {
+        websocket.send(
+          JSON.stringify({
+            type: "invite",
+            peer_id: vue.$data.form.peer_id,
+            psw: vue.$data.form.psw,
+          })
+        );
+      }, 5000);
       peerId = vue.$data.form.peer_id;
     }
 
@@ -208,14 +218,25 @@
       vue.$data.dialogFormVisible = true;
       vue.$data.connecting = false;
       clearTimeout(connectTimeoutTimerId);
+      clearTimeout(connectHeartBeatDetectTimerId);
+      clearInterval(sendInviteTimerId);
+      sendInviteTimerId = -1;
       connectTimeoutTimerId = -1;
+      connectHeartBeatDetectTimerId = -1;
       if (!!peerConnection) {
         peerConnection.close();
         peerConnection = null;
         dataChannel = null;
         remoteCandidates = [];
         haveOffer = false;
+        peerId = null;
       }
+      vid.removeEventListener("mousedown", handleClientRectMouseDown);
+      vid.removeEventListener("mouseup", handleClientRectMouseUp);
+      vid.removeEventListener("mousemove", handleClientRectMouseMove);
+      vid.removeEventListener("keydown", handleClientRectKeyDown);
+      vid.removeEventListener("keyup", handleClientRectKeyUp);
+      vid.removeEventListener("wheel", handleClientRectWheel);
     }
 
     function handleConnectSucc() {
@@ -231,10 +252,19 @@
           customClass: "messageIndex",
         });
       }, 60000);
+      const vid = document.querySelector("video");
+      vid.addEventListener("mousedown", handleClientRectMouseDown);
+      vid.addEventListener("mouseup", handleClientRectMouseUp);
+      vid.addEventListener("mousemove", handleClientRectMouseMove);
+      vid.addEventListener("keydown", handleClientRectKeyDown);
+      vid.addEventListener("keyup", handleClientRectKeyUp);
+      vid.addEventListener("wheel", handleClientRectWheel);
     }
 
     function handlePeerMsg(msg) {
       if (peerId != msg.peer_id) return;
+      clearInterval(sendInviteTimerId);
+      sendInviteTimerId = -1;
       if (msg.type === "close") {
         handleConnectFailed();
         vue.$message({
@@ -408,5 +438,44 @@
         websocket.send('{"peer_id":"' + peerId + '", "type":"close"}');
       }
     };
+
+    function handleClientRectMouseDown(event) {
+      dataChannel.send(
+        "mousedown " + event.clientX + " " + event.clientY + " " + event.button
+      );
+    }
+
+    function handleClientRectMouseUp(event) {
+      dataChannel.send(
+        "mouseup " + event.clientX + " " + event.clientY + " " + event.button
+      );
+    }
+
+    function handleClientRectMouseMove(event) {
+      dataChannel.send("mousemove " + event.clientX + " " + event.clientY);
+    }
+
+    function handleClientRectWheel(event) {
+      dataChannel.send(
+        "wheel " +
+          event.deltaX +
+          " " +
+          event.deltaY +
+          " " +
+          event.deltaZ +
+          " " +
+          event.deltaMode
+      );
+    }
+
+    function handleClientRectKeyDown(event) {
+      dataChannel.send("keydown " + event.code + " " + event.key);
+      event.preventDefault();
+      return false;
+    }
+
+    function handleClientRectKeyUp(event) {
+      dataChannel.send("keyup " + event.code + " " + event.key);
+    }
   </script>
 </html>
